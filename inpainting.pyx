@@ -1,8 +1,9 @@
-# cython: boundscheck=False, wraparound = False, cdivision = True
+#!python
+#cython: boundscheck=False, wraparound=False
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport sqrt, exp
+from libc.math cimport sqrt, pow
 from libc.stdlib import malloc, free
 from cython.parallel import prange, parallel
 from pylab import *
@@ -57,8 +58,8 @@ cdef double[:,:] get_patch(int cntr_ptx,
 
     return patch
 
-cdef copy_patch(np.ndarray[DTYPE_t, ndim=3] patch_dst,
-                 np.ndarray[DTYPE_t, ndim=3] patch_src):
+cdef np.ndarray[DTYPE_t, ndim=3] copy_patch(double[:,:,:] patch_dst,
+                                            double[:,:,:] patch_src):
     '''Copies the values from patch_src to patch_dst at where patch_dst has
     values specifying an unfilled region (unfilled regions have value of
     [0.0, 1.0, 0.0]).
@@ -78,25 +79,25 @@ cdef copy_patch(np.ndarray[DTYPE_t, ndim=3] patch_dst,
     '''
 
     # find locations of unfilled pixels
-    unfilled_pixels = np.where(patch_dst[:,:,1] == 0.9999)
+
 
     cdef:
+        np.ndarray[DTYPEi_t, ndim=2] unfilled_pixels = np.where(np.asarray(patch_dst)[:,:,1] == 0.9999)
         # x coordinates of unfilled pixels
-        np.ndarray[DTYPEi_t, ndim=1] unf_x = unfilled_pixels[0]
+        int[:] unf_x = unfilled_pixels[0]
         # y coordinates of unfilled pixels
-        np.ndarray[DTYPEi_t, ndim=1] unf_y = unfilled_pixels[1]
-        int i = 0
+        int[:] unf_y = unfilled_pixels[1]
+        int i = 0, unfilled_len = len(unf_x)
 
-    while i <= len(unf_x) - 1:
-        patch_dst[unf_x[i]][unf_y[i]] = patch_src[unf_x[i]][unf_y[i]]
-        i += 1
+    for i in prange(unfilled_len, nogil=True, num_threads=4):
+        patch_dst[unf_x[i]][unf_y[i]][:] = patch_src[unf_x[i]][unf_y[i]][:]
 
-    return patch_dst
+    return np.asarray(patch_dst)
 
-cdef paste_patch(x, y,
-                 np.ndarray[DTYPE_t, ndim=3] patch,
-                 np.ndarray[DTYPE_t, ndim=3]img,
-                 patch_size = 9):
+cdef np.ndarray[DTYPE_t, ndim=3] paste_patch(int x, int y,
+                                             np.ndarray[DTYPE_t, ndim=3] patch,
+                                             np.ndarray[DTYPE_t, ndim=3]img,
+                                             int patch_size = 9):
     '''Updates the confidence values and mask image for the image to be
     to be inpainted.
 
@@ -120,7 +121,7 @@ cdef paste_patch(x, y,
     '''
 
     cdef:
-        int p = patch_size // 2
+        int p = patch_size / 2
         int x0 = x-p
         int x1 = x+p
         int y0 = y-p
@@ -211,8 +212,8 @@ cdef find_max_priority(np.ndarray[DTYPEi_t, ndim=1] boundary_ptx,
         
         float data = abs(max_gradx * Nx + max_grady * Ny)
         
-    if (Nx ** 2 + Ny ** 2) != 0:
-        data /= (Nx ** 2 + Ny ** 2)
+    if (pow(Nx, 2) + pow(Ny, 2)) != 0:
+        data /= (pow(Nx, 2) + pow(Ny, 2))
         
     cdef:
         float max = conf * (data / alpha) # initial priority value
@@ -240,7 +241,7 @@ cdef find_max_priority(np.ndarray[DTYPEi_t, ndim=1] boundary_ptx,
         Ny = ny[boundary_ptx[i]][boundary_pty[i]]
         curr_data = abs(max_gradx * Nx + max_grady * Ny)
         if (Nx ** 2 + Ny ** 2) != 0:
-            curr_data /= (sqrt(Nx ** 2 + Ny ** 2))
+            curr_data /= (sqrt(pow(Nx, 2) + pow(Ny, 2)))
         curr_p = curr_conf * (curr_data / alpha)
         if curr_p > max:
             max = curr_p
@@ -249,8 +250,8 @@ cdef find_max_priority(np.ndarray[DTYPEi_t, ndim=1] boundary_ptx,
         i += 1
     return max, x, y
     
-cdef patch_ssd(np.ndarray[DTYPE_t, ndim=3] patch_dst,
-               np.ndarray[DTYPE_t, ndim=3] patch_src):
+cdef float patch_ssd(np.ndarray[DTYPE_t, ndim=3] patch_dst,
+                     np.ndarray[DTYPE_t, ndim=3] patch_src):
     '''Computes the sum of squared differences between patch_dst and patch_src
     at every pixel.
     
@@ -272,25 +273,24 @@ cdef patch_ssd(np.ndarray[DTYPE_t, ndim=3] patch_dst,
         int n = patch_dst.shape[1]
         # ensure two patches are of same dimensions
         np.ndarray[DTYPE_t, ndim=3] patch_srcc = patch_src[:m, :n, :]
-        np.ndarray[DTYPE_t, ndim=1] patch_dst_r = patch_dst[:,:,0].flatten()
-        np.ndarray[DTYPE_t, ndim=1] patch_dst_g = patch_dst[:,:,1].flatten()
-        np.ndarray[DTYPE_t, ndim=1] patch_dst_b = patch_dst[:,:,2].flatten()
-        np.ndarray[DTYPE_t, ndim=1] patch_src_r = patch_srcc[:,:,0].flatten()
-        np.ndarray[DTYPE_t, ndim=1] patch_src_g = patch_srcc[:,:,1].flatten()
-        np.ndarray[DTYPE_t, ndim=1] patch_src_b = patch_srcc[:,:,2].flatten()
-        int i = 0
-        int len = patch_dst_r.shape[0]
-        float sum = 0
+        double[:] patch_dst_r = patch_dst[:,:,0].flatten()
+        double[:] patch_dst_g = patch_dst[:,:,1].flatten()
+        double[:] patch_dst_b = patch_dst[:,:,2].flatten()
+        double[:] patch_src_r = patch_srcc[:,:,0].flatten()
+        double[:] patch_src_g = patch_srcc[:,:,1].flatten()
+        double[:] patch_src_b = patch_srcc[:,:,2].flatten()
+        int i, flat_patch_len = patch_dst_r.shape[0]
+        float ssd_sum = 0
 
-    while i <= len - 1:
+    for i in prange(flat_patch_len, nogil=True, num_threads=4):
         if (patch_dst_r[i] != 0.0 and
             patch_dst_g[i] != 0.9999 and
             patch_dst_b[i] != 0.0): # ignore unfilled pixels 
-            sum += (patch_dst_r[i] - patch_src_r[i]) ** 2
-            sum += (patch_dst_g[i] - patch_src_g[i]) ** 2
-            sum += (patch_dst_b[i] - patch_src_b[i]) ** 2
-        i += 1
-    return sum
+            ssd_sum += pow(patch_dst_r[i] - patch_src_r[i], 2)
+            ssd_sum += pow(patch_dst_g[i] - patch_src_g[i], 2)
+            ssd_sum += pow(patch_dst_b[i] - patch_src_b[i], 2)
+
+    return ssd_sum
     
 cdef find_exemplar_patch_ssd(np.ndarray[DTYPE_t, ndim=3] img,
                              np.ndarray[DTYPE_t, ndim=3] patch,
@@ -362,10 +362,10 @@ cdef find_exemplar_patch_ssd(np.ndarray[DTYPE_t, ndim=3] img,
         i += 1
     return best_patch, best_x, best_y
     
-cdef update(x, y,
-            np.ndarray confidence,
-            np.ndarray mask,
-            patch_size = 9):
+cdef update(int x, int y,
+            int[:,:] confidence,
+            int[:,:] mask,
+            int patch_size = 9):
     '''Updates the confidence values and mask image for the image to be
     to be inpainted.
     
@@ -393,19 +393,20 @@ cdef update(x, y,
     '''
     
     cdef:
-        int p = patch_size // 2
+        int p = patch_size / 2
         int i, j
         int x0 = x-p
         int x1 = x+p
         int y0 = y-p
         int y1 = y+p
-        
-    for i from x0 <= i <= x1:
-        for j from y0 <= j <= y1:
-            confidence[i,j] = 1
-            mask[i,j] = 1
+
+    with nogil, parallel(num_threads=4):
+        for i from x0 <= i <= x1:
+            for j from y0 <= j <= y1:
+                confidence[i,j] = 1
+                mask[i,j] = 1
             
-    return confidence, mask
+    return np.asarray(confidence), np.asarray(mask)
     
 def inpaint(src_im, mask_im, save_name,
             gaussian_blur=0,
@@ -513,8 +514,8 @@ def inpaint(src_im, mask_im, save_name,
                                         patch_size)
         patch_count += 1
         print patch_count, 'patches inpainted', highest_priority[1:], '<-', best_patch[1:]
-        imsave(save_name, unfilled_img) # save intermediate results
-    
+
+    imsave(save_name, unfilled_img)
     # show the result
     plt.title('Inpainted Image')
     plt.axis('off')
