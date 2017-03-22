@@ -4,6 +4,8 @@ import wx.lib.agw.floatspin as fs
 from inpainting import inpaint
 import numpy as np
 from scipy.misc import imread
+from timeit import timeit
+import threading
 
 class InpaintingGUI(wx.Frame):
     
@@ -66,6 +68,8 @@ class InpaintingGUI(wx.Frame):
         self.Bind(wx.EVT_MENU, self.onPatchSize, id=201)
         self.Bind(wx.EVT_MENU, self.onGauss, id=202)
         self.Bind(wx.EVT_MENU, self.onQuit, id=105)
+        
+        self.inpaint_thread = None
         
         self.SetMenuBar(menubar)
         self.Centre()
@@ -195,7 +199,24 @@ class InpaintingGUI(wx.Frame):
             padded_img[pad_size:dim_x+pad_size, pad_size:dim_y+pad_size, :] = img
             padded_mask[pad_size:dim_x+pad_size, pad_size:dim_y+pad_size] = mask
             
-            inpaint(padded_img, padded_mask, self.img, self.gauss, self.sigma, self.patch_size)
+            self.inpaint_thread = InpaintingThread(padded_img, padded_mask, self.img, self.gauss, self.sigma, self.patch_size)
+
+            
+class InpaintingThread(threading.Thread):
+    def __init__(self, padded_img, padded_mask, img, gauss, sigma, patch_size):
+        threading.Thread.__init__(self)
+        self._padded_img = padded_img
+        self._padded_mask = padded_mask
+        self._img = img
+        self._gauss = gauss
+        self._sigma = sigma
+        self._patch_size = patch_size
+        
+        self.start()
+        
+    def run(self):
+        timeit(inpaint(self._padded_img, self._padded_mask, self._img, self._gauss, self._sigma, self._patch_size))
+            
         
 if __name__ == '__main__':
     app = wx.App(False)
