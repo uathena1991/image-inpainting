@@ -199,8 +199,8 @@ class InpaintingGUI(wx.Frame):
             padded_img[pad_size:dim_x+pad_size, pad_size:dim_y+pad_size, :] = img
             padded_mask[pad_size:dim_x+pad_size, pad_size:dim_y+pad_size] = mask
             
-            self.inpaint_thread = InpaintingThread(padded_img, padded_mask, self.img, self.gauss, self.sigma, self.patch_size)
-
+            inpainted = self.inpaint_thread = InpaintingThread(padded_img, padded_mask, self.img, self.gauss, self.sigma, self.patch_size)
+            
             
 class InpaintingThread(threading.Thread):
     def __init__(self, padded_img, padded_mask, img, gauss, sigma, patch_size):
@@ -215,7 +215,7 @@ class InpaintingThread(threading.Thread):
         self.start()
         
     def run(self):
-        timeit(inpaint(self._padded_img, self._padded_mask, self._img, self._gauss, self._sigma, self._patch_size))
+        return inpaint(self._padded_img, self._padded_mask, self._img, self._gauss, self._sigma, self._patch_size)
             
         
 if __name__ == '__main__':

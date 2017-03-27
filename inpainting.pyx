@@ -58,8 +58,8 @@ cdef double[:,:] get_patch(int cntr_ptx,
 
     return patch
 
-cdef np.ndarray[DTYPE_t, ndim=3] copy_patch(double[:,:,:] patch_dst,
-                                            double[:,:,:] patch_src):
+cdef np.ndarray[DTYPE_t, ndim=3] copy_patch(np.ndarray[DTYPE_t, ndim=3] patch_dst,
+                                            np.ndarray[DTYPE_t, ndim=3] patch_src):
     '''Copies the values from patch_src to patch_dst at where patch_dst has
     values specifying an unfilled region (unfilled regions have value of
     [0.0, 1.0, 0.0]).
@@ -88,15 +88,18 @@ cdef np.ndarray[DTYPE_t, ndim=3] copy_patch(double[:,:,:] patch_dst,
         # y coordinates of unfilled pixels
         int[:] unf_y = unfilled_pixels[1]
         int i = 0, unfilled_len = len(unf_x)
+        double[:,:] patch_dst_c = patch_dst[:,:]
+        double[:,:] patch_src_c = patch_src[:,:]
 
     for i in prange(unfilled_len, nogil=True, num_threads=4):
-        patch_dst[unf_x[i]][unf_y[i]][:] = patch_src[unf_x[i]][unf_y[i]][:]
+        patch_dst_c[unf_x[i]][unf_y[i]] = patch_src_c[unf_x[i]][unf_y[i]]
 
-    return np.asarray(patch_dst)
+    patch_dst[:,:] = patch_dst_c
+    return patch_dst_c
 
 cdef np.ndarray[DTYPE_t, ndim=3] paste_patch(int x, int y,
                                              np.ndarray[DTYPE_t, ndim=3] patch,
-                                             np.ndarray[DTYPE_t, ndim=3]img,
+                                             np.ndarray[DTYPE_t, ndim=3] img,
                                              int patch_size = 9):
     '''Updates the confidence values and mask image for the image to be
     to be inpainted.
@@ -128,14 +131,14 @@ cdef np.ndarray[DTYPE_t, ndim=3] paste_patch(int x, int y,
         int y1 = y+p
         int i,j
         int s = 0, t = 0
+        double[:,:] img_c = img[:,:]
+        double[:,:] patch_c = patch[:,:]
 
-    for i from x0 <= i <= x1:
+    for i in prange(x0, x1, nogil=True, num_threads=4):
         for j from y0 <= j <= y1:
-            img[i,j] = patch[s,t]
-            t += 1
-        s += 1
-        t = 0
+            img_c[i,j] = patch_c[i-x0,j-y0]
 
+    img[:,:] = img_c
     return img
 
 cdef find_max_priority(np.ndarray[DTYPEi_t, ndim=1] boundary_ptx,
@@ -517,6 +520,7 @@ def inpaint(src_im, mask_im, save_name,
 
     imsave(save_name, unfilled_img)
     # show the result
-    plt.title('Inpainted Image')
-    plt.axis('off')
-    plt.show(imshow(unfilled_img))
+    return unfilled_img
+    #plt.title('Inpainted Image')
+    #plt.axis('off')
+    #plt.show(imshow(unfilled_img))
