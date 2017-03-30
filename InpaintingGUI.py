@@ -198,8 +198,11 @@ class InpaintingGUI(wx.Frame):
             
             padded_img[pad_size:dim_x+pad_size, pad_size:dim_y+pad_size, :] = img
             padded_mask[pad_size:dim_x+pad_size, pad_size:dim_y+pad_size] = mask
-            
-            inpainted = self.inpaint_thread = InpaintingThread(padded_img, padded_mask, self.img, self.gauss, self.sigma, self.patch_size)
+
+            save_name = self.img[:self.img.rfind(".")] + "-inpainted.jpg"
+
+            self.inpaint_thread = InpaintingThread(padded_img, padded_mask, save_name,
+                                                   self.gauss, self.sigma, self.patch_size)
             
             
 class InpaintingThread(threading.Thread):

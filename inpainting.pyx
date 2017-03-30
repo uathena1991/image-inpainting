@@ -20,8 +20,7 @@ ctypedef np.int_t DTYPEi_t
 
 cdef inline double[:,:] get_patch(int x, int y, double[:,:] img, int patch_size) nogil:
     """
-    Gets the patch centered at x and y in the image img with dimensions
-    patch_size by patch_size.
+    Gets the patch centered at x and y in the image img with dimensions patch_size by patch_size.
 
     Parameters
     ----------
@@ -36,7 +35,7 @@ cdef inline double[:,:] get_patch(int x, int y, double[:,:] img, int patch_size)
 
     Returns
     -------
-    patch : 2-D or 3-D array
+    patch : 2-D array
         The patch of size patch_size by patch_size centered at (x,y) in img.
     """
 
@@ -45,8 +44,7 @@ cdef inline double[:,:] get_patch(int x, int y, double[:,:] img, int patch_size)
 
 cdef inline double[:,:,:] get_patch_3d(int x, int y, double[:,:,:] img, int patch_size) nogil:
     """
-    Gets the patch centered at x and y in the image img with dimensions
-    patch_size by patch_size.
+    Gets the patch centered at x and y in the image img with dimensions patch_size by patch_size.
 
     Parameters
     ----------
@@ -61,18 +59,57 @@ cdef inline double[:,:,:] get_patch_3d(int x, int y, double[:,:,:] img, int patc
 
     Returns
     -------
-    patch : 2-D or 3-D array
+    patch : 3-D array
         The patch of size patch_size by patch_size centered at (x,y) in img.
     """
 
     cdef int p = patch_size / 2
     return img[x-p:x+p,y-p:y+p,:]
 
-cdef double[:,:,:] paste_patch(int x, int y,
-                               double[:,:,:] patch, double[:,:,:] img,
-                               int patch_size = 9) nogil:
-    '''Updates the confidence values and mask image for the image to be
+cdef inline void update(int x, int y, int[:,:] confidence, int[:,:] mask, int patch_size = 9) nogil:
+    """
+    Updates the confidence values and mask image for the image to be
     to be inpainted.
+    
+    Parameters
+    ----------
+    x : int
+        x coordinate of the centre of the patch which has been filled.
+    y : int 
+        y coordinate of the centre of the patch which has been filled.
+    confidence : 2-D array
+        2-D array holding confidence values for the image to be inpainted.
+    mask : 2-D array
+        A binary image specifying regions to be inpainted with a value of 0 
+        and 1 elsewhere.
+    patch_size : int
+        Dimensions of the patch; must be odd.
+        
+    Returns
+    -------
+    confidence : 2-D array
+        2-D array holding confidence values for the image to be inpainted.
+    mask : 2-D array
+        A binary image specifying regions to be inpainted with a value of 0 
+        and 1 elsewhere.
+    """
+
+    cdef:
+        int p = patch_size / 2
+        int i, j
+        int x0 = x-p
+        int x1 = x+p
+        int y0 = y-p
+        int y1 = y+p
+
+    for i in prange(x0, x1, nogil=True):
+        for j from y0 <= j <= y1:
+            mask[i,j] = 1
+            confidence[i,j] = 1
+
+cdef inline void paste_patch(int x, int y, double[:,:,:] patch, double[:,:,:] img, int patch_size = 9) nogil:
+    """
+    Updates the confidence values and mask image for the image to be to be inpainted.
 
     Parameters
     ----------
@@ -91,7 +128,7 @@ cdef double[:,:,:] paste_patch(int x, int y,
     -------
     img : 3-D array
         The target image after it has been updated with the new filled patch.
-    '''
+    """
 
     cdef:
         int p = patch_size / 2
@@ -100,21 +137,19 @@ cdef double[:,:,:] paste_patch(int x, int y,
         int y0 = y-p
         int y1 = y+p
         int i,j
-        int s = 0, t = 0
 
     for i from x0 <= i <= x1:
         for j from y0 <= j <= y1:
-            img[i,j,:] = patch[i-x0,j-y0,:]
-
-    return img
+            for k from 0 <= k <= 2:
+                img[i,j,k] = patch[i-x0,j-y0,k]
 
 cdef tuple find_max_priority(int[:] boundary_ptx, int[:] boundary_pty,
                              np.ndarray[DTYPE_t, ndim=2] confidence,
                              np.ndarray[DTYPE_t, ndim=2] dx, np.ndarray[DTYPE_t, ndim=2] dy,
                              np.ndarray nx, np.ndarray ny,
                              int patch_size, double alpha = 255.0):
-    '''Finds the patch centered at pixels along the fill front which has the
-    highest priority value.
+    """
+    Finds the patch centered at pixels along the fill front which has the highest priority value.
 
     Parameters
     ----------
@@ -151,7 +186,7 @@ cdef tuple find_max_priority(int[:] boundary_ptx, int[:] boundary_pty,
     y : int
         y coordinate of the center of the patch at which the highest priority
         value was computed
-    '''
+    """
     # initialize first priority value
     cdef:
         float conf = np.sum(get_patch(boundary_ptx[0],
@@ -165,61 +200,59 @@ cdef tuple find_max_priority(int[:] boundary_ptx, int[:] boundary_pty,
                                                                boundary_pty[0],
                                                                grad,
                                                                patch_size))
-    cdef:
         int xx = np.where(grad_patch == np.max(grad_patch))[0][0]
         int yy = np.where(grad_patch == np.max(grad_patch))[1][0]
         float max_gradx = dx[xx][yy]
         float max_grady = dy[xx][yy]
         float Nx = nx[boundary_ptx[0]][boundary_pty[0]]
         float Ny = ny[boundary_ptx[0]][boundary_pty[0]]
-    
         int x = boundary_ptx[0]
         int y = boundary_pty[0]
-        
         float data = abs(max_gradx * Nx + max_grady * Ny)
+
         
     if (pow(Nx, 2) + pow(Ny, 2)) != 0:
         data /= (pow(Nx, 2) + pow(Ny, 2))
         
     cdef:
-        float max = conf * (data / alpha) # initial priority value
+        float max_p = conf * (data / alpha) # initial priority value
         int i = 1
         float curr_data = 0, curr_conf = 0, curr_grad = 0
     # iterate through all patches centered at a pixel on the boundary of 
     # unfilled region to find the patch with the highest priority value
     while i < len(boundary_ptx):
-        curr_patch = get_patch(boundary_ptx[i],
-                               boundary_pty[i], 
-                               confidence, 
-                               patch_size)
+        curr_patch = get_patch(boundary_ptx[i], boundary_pty[i], confidence, patch_size)
         curr_conf = np.sum(curr_patch)/pow(patch_size, 2) # confidence value
         # a gradient has value of 0 on the boundary;
         # so get the maximum gradient magnitude in a patch
-        grad_patch = abs(get_patch(boundary_ptx[i],
-                                   boundary_pty[i],
-                                   grad,
-                                   patch_size))
+        grad_patch = abs(get_patch(boundary_ptx[i], boundary_pty[i], grad, patch_size))
         xx = np.where(grad_patch == np.max(grad_patch))[0][0]
         yy = np.where(grad_patch == np.max(grad_patch))[1][0]
+
         max_gradx = dx[xx][yy]
-        max_grady = dy[xx][yy]            
+        max_grady = dy[xx][yy]
+
         Nx = nx[boundary_ptx[i]][boundary_pty[i]]
         Ny = ny[boundary_ptx[i]][boundary_pty[i]]
+
         curr_data = abs(max_gradx * Nx + max_grady * Ny)
         if (pow(Nx, 2) + pow(Ny, 2)) != 0:
             curr_data /= (sqrt(pow(Nx, 2) + pow(Ny, 2)))
+
         curr_p = curr_conf * (curr_data / alpha)
-        if curr_p > max:
-            max = curr_p
+        if curr_p > max_p:
+            max_p = curr_p
             x = boundary_ptx[i]
             y = boundary_pty[i]
+
         i += 1
-    return max, x, y
+
+    return max_p, x, y
     
 cdef float patch_ssd(np.ndarray[DTYPE_t, ndim=3] patch_dst,
                      np.ndarray[DTYPE_t, ndim=3] patch_src):
-    '''Computes the sum of squared differences between patch_dst and patch_src
-    at every pixel.
+    """
+    Computes the sum of squared differences between patch_dst and patch_src at every pixel.
     
     Parameters
     ----------
@@ -232,7 +265,7 @@ cdef float patch_ssd(np.ndarray[DTYPE_t, ndim=3] patch_dst,
     -------
     sum : float
         The sum of squared differences value of patch_dst and patch_src.
-    '''
+    """
     
     cdef:
         int m = patch_dst.shape[0]
@@ -260,8 +293,8 @@ cdef float patch_ssd(np.ndarray[DTYPE_t, ndim=3] patch_dst,
     
 cdef tuple find_exemplar_patch_ssd(double[:,:,:] img, double[:,:,:] patch,
                                    int x, int y, int patch_size = 9):
-    '''Finds the best exemplar patch with the minimum sum of squared 
-    differences.
+    """
+    Finds the best exemplar patch with the minimum sum of squared differences.
     
     Parameters
     ----------
@@ -287,7 +320,7 @@ cdef tuple find_exemplar_patch_ssd(double[:,:,:] img, double[:,:,:] patch,
         The x coordinate which best_patch is centered at.
     best_y : int
         The y coordinate which best_patch is centered at.
-    '''
+    """
     
     cdef: 
         int offset = patch_size / 2
@@ -297,8 +330,7 @@ cdef tuple find_exemplar_patch_ssd(double[:,:,:] img, double[:,:,:] patch,
         float min_ssd = np.inf
         # offset the borders of the image by offset pixels to avoid
         # looking through patches that are out of the region
-        np.ndarray[DTYPE_t, ndim=3] img_copy = img[offset:x_boundary-offset+1, 
-                                                   offset:y_boundary-offset+1]
+        np.ndarray[DTYPE_t, ndim=3] img_copy = img[offset:x_boundary-offset+1, offset:y_boundary-offset+1]
         
     # locations of the unfilled region
     filled_r = np.where(img_copy[:,:,1] != 0.9999)
@@ -323,52 +355,12 @@ cdef tuple find_exemplar_patch_ssd(double[:,:,:] img, double[:,:,:] patch,
                     best_y = yy[i] + offset
                     min_ssd = ssd
         i += 1
+
     return best_patch, best_x, best_y
-    
-cdef inline int[:,:] update(int x, int y, int[:,:] mask, int patch_size = 9):
-    '''Updates the confidence values and mask image for the image to be
-    to be inpainted.
-    
-    Parameters
-    ----------
-    x : int
-        x coordinate of the centre of the patch which has been filled.
-    y : int 
-        y coordinate of the centre of the patch which has been filled.
-    confidence : 2-D array
-        2-D array holding confidence values for the image to be inpainted.
-    mask : 2-D array
-        A binary image specifying regions to be inpainted with a value of 0 
-        and 1 elsewhere.
-    patch_size : int
-        Dimensions of the patch; must be odd.
-        
-    Returns
-    -------
-    confidence : 2-D array
-        2-D array holding confidence values for the image to be inpainted.
-    mask : 2-D array
-        A binary image specifying regions to be inpainted with a value of 0 
-        and 1 elsewhere.
-    '''
 
-    cdef:
-        int p = patch_size / 2
-        int i, j
-        int x0 = x-p
-        int x1 = x+p
-        int y0 = y-p
-        int y1 = y+p
-
-    for i in prange(x0, x1, nogil=True):
-        for j from y0 <= j <= y1:
-            mask[i,j] = 1
-
-    return mask
-
-cpdef double[:,:,:] inpaint(src_im, mask_im, save_name,
-                            int gaussian_blur=0, int gaussian_sigma=1, int patch_size=9):
-    '''Runs the inpainting algorithm.
+cpdef void inpaint(src_im, mask_im, save_name, int gaussian_blur=0, int gaussian_sigma=1, int patch_size=9):
+    """
+    Runs the inpainting algorithm.
     
     Parameters
     ----------
@@ -390,10 +382,8 @@ cpdef double[:,:,:] inpaint(src_im, mask_im, save_name,
     -------
     unfilled_img : 3-D array
         The inpainted image.
-    '''
-    dot = save_name.rfind('.')
-    save_name = save_name[:dot] + '-inpainted.jpg'
-    
+    """
+
     cdef:
         np.ndarray src = src_im
         np.ndarray mask = mask_im
@@ -448,17 +438,15 @@ cpdef double[:,:,:] inpaint(src_im, mask_im, save_name,
         max_patch = get_patch(max_x, max_y, unfilled_img, patch_size)
         
         best_patch = find_exemplar_patch_ssd(unfilled_img, max_patch, max_x, max_y, patch_size)
-        unfilled_img = paste_patch(max_x, max_y, best_patch[0], unfilled_img, patch_size)
+        paste_patch(max_x, max_y, best_patch[0], unfilled_img, patch_size)
 
-        confidence_image = update(max_x, max_y, confidence, patch_size)
-        mask = update(max_x, max_y, mask, patch_size)
+        update(max_x, max_y, confidence, mask, patch_size)
 
         patch_count += 1
         print patch_count, 'patches inpainted', highest_priority[1:], '<-', best_patch[1:]
 
     imsave(save_name, unfilled_img)
     # show the result
-    return unfilled_img
-    #plt.title('Inpainted Image')
-    #plt.axis('off')
-    #plt.show(imshow(unfilled_img))
+    plt.title('Inpainted Image')
+    plt.axis('off')
+    plt.show(imshow(unfilled_img))
