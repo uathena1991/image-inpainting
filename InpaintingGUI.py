@@ -76,11 +76,11 @@ class InpaintingGUI(wx.Frame):
         self.Show()
 
     def onQuit(self, e):
-        '''Closes GUI'''
+        """Closes GUI."""
         self.Close()
         
     def onAbout(self,e):
-        '''Opens About dialog'''
+        """Opens About dialog."""
         aboutMsg = 'This program is an implementation of an image inpainting ' +\
                    'algorithm mentioned in \'Region Filling and Object Removal ' +\
                    'by Exemplar-Based Image Inpainting\' by Criminisi et al. ' +\
@@ -93,7 +93,7 @@ class InpaintingGUI(wx.Frame):
         dlg.Destroy()
     
     def onOpenImage(self, e):
-        '''Open image to inpaint'''
+        """Open image to inpaint."""
         wildcard = 'JPEG files (*.jpg)|*.jpg|' +\
                    'PNG files (*.png)|*.png|' +\
                    'Other files (*.*)|*.*'
@@ -110,7 +110,7 @@ class InpaintingGUI(wx.Frame):
         dlg.Destroy()
         
     def onOpenMask(self, e):
-        '''Open mask'''
+        """Open mask"""
         wildcard = 'BMP files (*.bmp)|*.bmp|' +\
                    'PGM files (*.pgm)|*.pgm|' +\
                    'Other files (*.*)|*.*'
@@ -127,7 +127,7 @@ class InpaintingGUI(wx.Frame):
         dlg.Destroy()
         
     def onPatchSize(self, e):
-        '''Opens menu to set patch size'''
+        """Opens menu to set patch size."""
         ps = 'Enter patch size value:'
         dlg = wx.NumberEntryDialog(self, '', ps, 'Patch Size', 
                                    self.patch_size, 1, 1000)
@@ -144,8 +144,7 @@ class InpaintingGUI(wx.Frame):
         dlg.Destroy()
         
     def onGauss(self, e):
-        '''Opens menu to apply Gaussian smoothing to the image 
-        prior to calculating iamge gradients.'''
+        """Opens menu to apply Gaussian smoothing to the image prior to calculating iamge gradients."""
         dlg = wx.Dialog(self, -1, title='Gaussian Smoothing')
         check = wx.CheckBox(dlg, label='Gaussian Smoothing', pos=(15, 30))
         wx.StaticText(dlg, label='Sigma', pos=(20, 65))
@@ -175,7 +174,7 @@ class InpaintingGUI(wx.Frame):
         dlg.ShowModal()
         
     def onInpaint(self, e):
-        '''Runs the inpainting algorithm when Inpaint button is clicked'''
+        """Runs the inpainting algorithm when Inpaint button is clicked."""
         img = imread(self.img)
         mask = imread(self.mask)
         wrongDim = 'Image and mask must have same dimensions.'
@@ -203,6 +202,7 @@ class InpaintingGUI(wx.Frame):
 
             self.inpaint_thread = InpaintingThread(padded_img, padded_mask, save_name,
                                                    self.gauss, self.sigma, self.patch_size)
+            self.inpaint_thread.start()
             
             
 class InpaintingThread(threading.Thread):
@@ -215,8 +215,7 @@ class InpaintingThread(threading.Thread):
         self._sigma = sigma
         self._patch_size = patch_size
         
-        self.start()
-        
+
     def run(self):
         return inpaint(self._padded_img, self._padded_mask, self._img, self._gauss, self._sigma, self._patch_size)
             
