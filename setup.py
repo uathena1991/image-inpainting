@@ -5,7 +5,8 @@ from Cython.Distutils import build_ext
 
 ext_modules=[
     Extension("inpainting",
-              sources=["inpainting.pyx"],
+              sources=["inpainting.pyx", "utils.c"],
+              language="c",
               libraries=["m"],
               extra_compile_args=["-O3", "-ffast-math", "-march=native", "-fopenmp"],
               extra_link_args=["-fopenmp"])
